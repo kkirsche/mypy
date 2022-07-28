@@ -539,16 +539,12 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         elif isinstance(object_type, TupleType):
             type_name = tuple_fallback(object_type).type.fullname
 
-        if type_name is not None:
-            return f"{type_name}.{method_name}"
-        else:
-            return None
+        return f"{type_name}.{method_name}" if type_name is not None else None
 
     def always_returns_none(self, node: Expression) -> bool:
         """Check if `node` refers to something explicitly annotated as only returning None."""
-        if isinstance(node, RefExpr):
-            if self.defn_returns_none(node.node):
-                return True
+        if isinstance(node, RefExpr) and self.defn_returns_none(node.node):
+            return True
         if isinstance(node, MemberExpr) and node.node is None:  # instance or class attribute
             typ = get_proper_type(self.chk.lookup_type(node.expr))
             if isinstance(typ, Instance):
@@ -603,8 +599,7 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         for expr in mypy.checker.flatten(e.args[1]):
             tp = get_proper_type(self.chk.lookup_type(expr))
             if isinstance(tp, CallableType) and tp.is_type_obj() and tp.type_object().is_protocol:
-                attr_members = non_method_protocol_members(tp.type_object())
-                if attr_members:
+                if attr_members := non_method_protocol_members(tp.type_object()):
                     self.chk.msg.report_non_method_protocol(tp.type_object(), attr_members, e)
 
     def check_typeddict_call(
@@ -615,7 +610,7 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         args: List[Expression],
         context: Context,
     ) -> Type:
-        if len(args) >= 1 and all([ak == ARG_NAMED for ak in arg_kinds]):
+        if args and all(ak == ARG_NAMED for ak in arg_kinds):
             # ex: Point(x=42, y=1337)
             assert all(arg_name is not None for arg_name in arg_names)
             item_names = cast(List[str], arg_names)
@@ -633,7 +628,7 @@ class ExpressionChecker(ExpressionVisitor[Type]):
                 # ex: Point(dict(x=42, y=1337))
                 return self.check_typeddict_call_with_dict(callee, unique_arg.analyzed, context)
 
-        if len(args) == 0:
+        if not args:
             # ex: EmptyDict()
             return self.check_typeddict_call_with_kwargs(callee, OrderedDict(), context)
 
@@ -791,9 +786,7 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         if not isinstance(var, Var):
             return None
         partial_types = self.chk.find_partial_types(var)
-        if partial_types is None:
-            return None
-        return var, partial_types
+        return None if partial_types is None else (var, partial_types)
 
     def try_infer_partial_value_type_from_call(
         self, e: CallExpr, methodname: str, var: Var
@@ -827,12 +820,13 @@ class ExpressionChecker(ExpressionVisitor[Type]):
             arg_type = get_proper_type(self.accept(e.args[0]))
             if isinstance(arg_type, Instance):
                 arg_typename = arg_type.type.fullname
-                if arg_typename in self.container_args[typename][methodname]:
-                    if all(
-                        mypy.checker.is_valid_inferred_type(item_type)
-                        for item_type in arg_type.args
-                    ):
-                        return self.chk.named_generic_type(typename, list(arg_type.args))
+                if arg_typename in self.container_args[typename][
+                    methodname
+                ] and all(
+                    mypy.checker.is_valid_inferred_type(item_type)
+                    for item_type in arg_type.args
+                ):
+                    return self.chk.named_generic_type(typename, list(arg_type.args))
             elif isinstance(arg_type, AnyType):
                 return self.chk.named_type(typename)
 
@@ -1009,19 +1003,20 @@ class ExpressionChecker(ExpressionVisitor[Type]):
         """
         callee = get_proper_type(callee)
         if callable_name is not None and isinstance(callee, FunctionLike):
-            if object_type is not None:
-                method_sig_hook = self.plugin.get_method_signature_hook(callable_name)
-                if method_sig_hook:
-                    return self.apply_method_signature_hook(
-                        callee, args, arg_kinds, context, arg_names, object_type, method_sig_hook
-                    )
-            else:
-                function_sig_hook = self.plugin.get_function_signature_hook(callable_name)
-                if function_sig_hook:
+            if object_type is None:
+                if function_sig_hook := self.plugin.get_function_signature_hook(
+                    callable_name
+                ):
                     return self.apply_function_signature_hook(
                         callee, args, arg_kinds, context, arg_names, function_sig_hook
                     )
 
+            elif method_sig_hook := self.plugin.get_method_signature_hook(
+                callable_name
+            ):
+                return self.apply_method_signature_hook(
+                    callee, args, arg_kinds, context, arg_names, object_type, method_sig_hook
+                )
         return callee
 
     def check_call_expr_with_callee_type(
@@ -1169,7 +1164,7 @@ class ExpressionChecker(ExpressionVisitor[Type]):
                 chk=self.chk,
                 in_literal_context=self.is_literal_context(),
             )
-            callable_name = callee.type.fullname + ".__call__"
+            callable_name = f"{callee.type.fullname}.__call__"
             # Apply method signature hook, if one exists
             call_function = self.transform_callee_type(
                 callable_name, call_function, args, arg_kinds, context, arg_names, callee

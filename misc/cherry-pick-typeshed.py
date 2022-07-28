@@ -16,7 +16,7 @@ import tempfile
 def parse_commit_title(diff: str) -> str:
     m = re.search("\n    ([^ ].*)", diff)
     assert m is not None, "Could not parse diff"
-    return m.group(1)
+    return m[1]
 
 
 def main() -> None:
@@ -35,7 +35,10 @@ def main() -> None:
         sys.exit(f"error: Invalid commit {commit!r}")
 
     if not os.path.exists("mypy") or not os.path.exists("mypyc"):
-        sys.exit(f"error: This script must be run at the mypy repository root directory")
+        sys.exit(
+            "error: This script must be run at the mypy repository root directory"
+        )
+
 
     with tempfile.TemporaryDirectory() as d:
         diff_file = os.path.join(d, "diff")

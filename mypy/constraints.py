@@ -77,18 +77,19 @@ class Constraint:
         self.target = target
 
     def __repr__(self) -> str:
-        op_str = "<:"
-        if self.op == SUPERTYPE_OF:
-            op_str = ":>"
+        op_str = ":>" if self.op == SUPERTYPE_OF else "<:"
         return f"{self.type_var} {op_str} {self.target}"
 
     def __hash__(self) -> int:
         return hash((self.type_var, self.op, self.target))
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Constraint):
-            return False
-        return (self.type_var, self.op, self.target) == (other.type_var, other.op, other.target)
+        return (
+            (self.type_var, self.op, self.target)
+            == (other.type_var, other.op, other.target)
+            if isinstance(other, Constraint)
+            else False
+        )
 
 
 def infer_constraints_for_callable(
@@ -327,10 +328,7 @@ def is_same_constraints(x: List[Constraint], y: List[Constraint]) -> bool:
     for c1 in x:
         if not any(is_same_constraint(c1, c2) for c2 in y):
             return False
-    for c1 in y:
-        if not any(is_same_constraint(c1, c2) for c2 in x):
-            return False
-    return True
+    return all(any(is_same_constraint(c1, c2) for c2 in x) for c1 in y)
 
 
 def is_same_constraint(c1: Constraint, c2: Constraint) -> bool:
@@ -376,8 +374,7 @@ def _is_similar_constraints(x: List[Constraint], y: List[Constraint]) -> bool:
 
 
 def simplify_away_incomplete_types(types: Iterable[Type]) -> List[Type]:
-    complete = [typ for typ in types if is_complete_type(typ)]
-    if complete:
+    if complete := [typ for typ in types if is_complete_type(typ)]:
         return complete
     else:
         return list(types)

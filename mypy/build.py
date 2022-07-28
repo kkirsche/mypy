@@ -310,10 +310,7 @@ def normpath(path: str, options: Options) -> str:
     # TODO: Could we always use relpath?  (A worry in non-bazel
     # mode would be that a moved file may change its full module
     # name without changing its size, mtime or hash.)
-    if options.bazel:
-        return os.path.relpath(path)
-    else:
-        return os.path.abspath(path)
+    return os.path.relpath(path) if options.bazel else os.path.abspath(path)
 
 
 class CacheMeta(NamedTuple):
@@ -503,11 +500,11 @@ def load_plugins(
     custom_plugins += extra_plugins
 
     default_plugin: Plugin = DefaultPlugin(options)
-    if not custom_plugins:
-        return default_plugin, snapshot
-
-    # Custom plugins take precedence over the default plugin.
-    return ChainedPlugin(options, custom_plugins + [default_plugin]), snapshot
+    return (
+        (ChainedPlugin(options, custom_plugins + [default_plugin]), snapshot)
+        if custom_plugins
+        else (default_plugin, snapshot)
+    )
 
 
 def take_module_snapshot(module: types.ModuleType) -> str:
@@ -532,7 +529,7 @@ def find_config_file_line_number(path: str, section: str, setting_name: str) -> 
     Return -1 if can't determine the line unambiguously.
     """
     in_desired_section = False
-    try:
+    with contextlib.suppress(OSError):
         results = []
         with open(path, encoding="UTF-8") as f:
             for i, line in enumerate(f):
@@ -544,8 +541,6 @@ def find_config_file_line_number(path: str, section: str, setting_name: str) -> 
                     results.append(i + 1)
         if len(results) == 1:
             return results[0]
-    except OSError:
-        pass
     return -1
 
 
@@ -663,9 +658,7 @@ class BuildManager:
         # for efficient lookup
         self.shadow_map: Dict[str, str] = {}
         if self.options.shadow_file is not None:
-            self.shadow_map = {
-                source_file: shadow_file for (source_file, shadow_file) in self.options.shadow_file
-            }
+            self.shadow_map = dict(self.options.shadow_file)
         # a mapping from each file being typechecked to its possible shadow file
         self.shadow_equivalence_map: Dict[str, Optional[str]] = {}
         self.plugin = plugin
@@ -691,7 +684,7 @@ class BuildManager:
         if self.options.dump_build_stats:
             print("Stats:")
             for key, value in sorted(self.stats_summary().items()):
-                print(f"{key + ':':24}{value}")
+                print(f"{f'{key}:':24}{value}")
 
     def use_fine_grained_cache(self) -> bool:
         return self.cache_enabled and self.options.use_fine_grained_cache
@@ -712,7 +705,7 @@ class BuildManager:
                     self.shadow_equivalence_map[path] = None
 
         shadow_file = self.shadow_equivalence_map.get(path)
-        return shadow_file if shadow_file else path
+        return shadow_file or path
 
     def get_stat(self, path: str) -> os.stat_result:
         return self.fscache.stat(self.maybe_swap_for_shadow_path(path))
@@ -723,10 +716,7 @@ class BuildManager:
         (Bazel's distributed cache doesn't like filesystem metadata to
         end up in output files.)
         """
-        if self.options.bazel:
-            return 0
-        else:
-            return int(self.metastore.getmtime(path))
+        return 0 if self.options.bazel else int(self.metastore.getmtime(path))
 
     def all_imported_modules_in_file(self, file: MypyFile) -> List[Tuple[int, str, int]]:
         """Find all reachable import statements in a file.
@@ -747,7 +737,7 @@ class BuildManager:
                 rel -= 1
             if rel != 0:
                 file_id = ".".join(file_id.split(".")[:-rel])
-            new_id = file_id + "." + imp.id if imp.id else file_id
+            new_id = f"{file_id}.{imp.id}" if imp.id else file_id
 
             if not new_id:
                 self.errors.set_file(file.path, file.name)
@@ -776,7 +766,7 @@ class BuildManager:
                     # Also add any imported names that are submodules.
                     pri = import_priority(imp, PRI_MED)
                     for name, __ in imp.names:
-                        sub_id = cur_id + "." + name
+                        sub_id = f"{cur_id}.{name}"
                         if self.is_module(sub_id):
                             res.append((pri, sub_id, imp.line))
                         else:
@@ -787,7 +777,7 @@ class BuildManager:
                     # As a workaround for for some bugs in cycle handling (#4498),
                     # if all of the imports are submodules, do the import at a lower
                     # priority.
-                    pri = import_priority(imp, PRI_HIGH if not all_are_submodules else PRI_LOW)
+                    pri = import_priority(imp, PRI_LOW if all_are_submodules else PRI_HIGH)
                     res.append((pri, cur_id, imp.line))
                 elif isinstance(imp, ImportAll):
                     pri = import_priority(imp, PRI_HIGH)
@@ -1041,8 +1031,9 @@ def read_plugins_snapshot(manager: BuildManager) -> Optional[Dict[str, str]]:
         return None
     if not isinstance(snapshot, dict):
         manager.log(
-            "Could not load plugins snapshot: cache is not a dict: {}".format(type(snapshot))
+            f"Could not load plugins snapshot: cache is not a dict: {type(snapshot)}"
         )
+
         return None
     return snapshot
 
@@ -1152,8 +1143,7 @@ def _cache_dir_prefix(options: Options) -> str:
         return os.curdir
     cache_dir = options.cache_dir
     pyversion = options.python_version
-    base = os.path.join(cache_dir, "%d.%d" % pyversion)
-    return base
+    return os.path.join(cache_dir, "%d.%d" % pyversion)
 
 
 def add_catch_all_gitignore(target_dir: str) -> None:
@@ -1162,12 +1152,10 @@ def add_catch_all_gitignore(target_dir: str) -> None:
     No-op if the .gitignore already exists.
     """
     gitignore = os.path.join(target_dir, ".gitignore")
-    try:
+    with contextlib.suppress(FileExistsError):
         with open(gitignore, "x") as f:
             print("# Automatically created by mypy", file=f)
             print("*", file=f)
-    except FileExistsError:
-        pass
 
 
 def exclude_from_backups(target_dir: str) -> None:
@@ -1176,7 +1164,7 @@ def exclude_from_backups(target_dir: str) -> None:
     If the CACHEDIR.TAG file exists the function is a no-op.
     """
     cachedir_tag = os.path.join(target_dir, "CACHEDIR.TAG")
-    try:
+    with contextlib.suppress(FileExistsError):
         with open(cachedir_tag, "x") as f:
             f.write(
                 """Signature: 8a477f597d28d172789f06886806bc55
@@ -1184,17 +1172,15 @@ def exclude_from_backups(target_dir: str) -> None:
 # For information about cache directory tags see https://bford.info/cachedir/
 """
             )
-    except FileExistsError:
-        pass
 
 
 def create_metastore(options: Options) -> MetadataStore:
     """Create the appropriate metadata store."""
-    if options.sqlite_cache:
-        mds: MetadataStore = SqliteMetadataStore(_cache_dir_prefix(options))
-    else:
-        mds = FilesystemMetadataStore(_cache_dir_prefix(options))
-    return mds
+    return (
+        SqliteMetadataStore(_cache_dir_prefix(options))
+        if options.sqlite_cache
+        else FilesystemMetadataStore(_cache_dir_prefix(options))
+    )
 
 
 def get_cache_names(id: str, path: str, options: Options) -> Tuple[str, str, Optional[str]]:
@@ -1223,14 +1209,11 @@ def get_cache_names(id: str, path: str, options: Options) -> Tuple[str, str, Opt
         root = _cache_dir_prefix(options)
         return (os.path.relpath(pair[0], root), os.path.relpath(pair[1], root), None)
     prefix = os.path.join(*id.split("."))
-    is_package = os.path.basename(path).startswith("__init__.py")
-    if is_package:
+    if is_package := os.path.basename(path).startswith("__init__.py"):
         prefix = os.path.join(prefix, "__init__")
 
-    deps_json = None
-    if options.cache_fine_grained:
-        deps_json = prefix + ".deps.json"
-    return (prefix + ".meta.json", prefix + ".data.json", deps_json)
+    deps_json = f"{prefix}.deps.json" if options.cache_fine_grained else None
+    return f"{prefix}.meta.json", f"{prefix}.data.json", deps_json
 
 
 def find_cache_meta(id: str, path: str, manager: BuildManager) -> Optional[CacheMeta]:
@@ -1257,8 +1240,9 @@ def find_cache_meta(id: str, path: str, manager: BuildManager) -> Optional[Cache
         return None
     if not isinstance(meta, dict):
         manager.log(
-            "Could not load cache for {}: meta cache is not a dict: {}".format(id, repr(meta))
+            f"Could not load cache for {id}: meta cache is not a dict: {repr(meta)}"
         )
+
         return None
     m = cache_meta_from_dict(meta, data_json)
     t2 = time.time()
@@ -1303,16 +1287,17 @@ def find_cache_meta(id: str, path: str, manager: BuildManager) -> Optional[Cache
             for key in sorted(set(cached_options) | set(current_options)):
                 if cached_options.get(key) != current_options.get(key):
                     manager.trace(
-                        "    {}: {} != {}".format(
-                            key, cached_options.get(key), current_options.get(key)
-                        )
+                        f"    {key}: {cached_options.get(key)} != {current_options.get(key)}"
                     )
+
         return None
-    if manager.old_plugins_snapshot and manager.plugins_snapshot:
-        # Check if plugins are still the same.
-        if manager.plugins_snapshot != manager.old_plugins_snapshot:
-            manager.log(f"Metadata abandoned for {id}: plugins differ")
-            return None
+    if (
+        manager.old_plugins_snapshot
+        and manager.plugins_snapshot
+        and manager.plugins_snapshot != manager.old_plugins_snapshot
+    ):
+        manager.log(f"Metadata abandoned for {id}: plugins differ")
+        return None
     # So that plugins can return data with tuples in it without
     # things silently always invalidating modules, we round-trip
     # the config data. This isn't beautiful.
@@ -1431,9 +1416,7 @@ def validate_meta(
                 manager.log(f"Using stale metadata for {id}: file {path}")
                 return meta
             else:
-                manager.log(
-                    "Metadata abandoned for {}: file {} has different hash".format(id, path)
-                )
+                manager.log(f"Metadata abandoned for {id}: file {path} has different hash")
                 return None
         else:
             t0 = time.time()
@@ -1463,10 +1446,9 @@ def validate_meta(
                 meta_str = json.dumps(meta_dict)
             meta_json, _, _ = get_cache_names(id, path, manager.options)
             manager.log(
-                "Updating mtime for {}: file {}, meta {}, mtime {}".format(
-                    id, path, meta_json, meta.mtime
-                )
+                f"Updating mtime for {id}: file {path}, meta {meta_json}, mtime {meta.mtime}"
             )
+
             t1 = time.time()
             manager.metastore.write(meta_json, meta_str)  # Ignore errors, just an optimization.
             manager.add_stats(validate_update_time=time.time() - t1, validate_munging_time=t1 - t0)
@@ -1558,10 +1540,8 @@ def write_cache(
         # Remove apparently-invalid cache files.
         # (This is purely an optimization.)
         for filename in [data_json, meta_json]:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(filename)
-            except OSError:
-                pass
         # Still return the interface hash we computed.
         return interface_hash, None
 

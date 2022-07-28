@@ -35,7 +35,7 @@ def map_actuals_to_formals(
     argument type with the given index.
     """
     nformals = len(formal_kinds)
-    formal_to_actual: List[List[int]] = [[] for i in range(nformals)]
+    formal_to_actual: List[List[int]] = [[] for _ in range(nformals)]
     ambiguous_actual_kwargs: List[int] = []
     fi = 0
     for ai, actual_kind in enumerate(actual_kinds):

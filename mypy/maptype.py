@@ -16,11 +16,11 @@ def map_instance_to_supertype(instance: Instance, superclass: TypeInfo) -> Insta
         # Fast path: `instance` already belongs to `superclass`.
         return instance
 
-    if not superclass.type_vars:
-        # Fast path: `superclass` has no type variables to map to.
-        return Instance(superclass, [])
-
-    return map_instance_to_supertypes(instance, superclass)[0]
+    return (
+        map_instance_to_supertypes(instance, superclass)[0]
+        if superclass.type_vars
+        else Instance(superclass, [])
+    )
 
 
 def map_instance_to_supertypes(instance: Instance, supertype: TypeInfo) -> List[Instance]:
@@ -37,10 +37,9 @@ def map_instance_to_supertypes(instance: Instance, supertype: TypeInfo) -> List[
         result.extend(types)
     if result:
         return result
-    else:
-        # Nothing. Presumably due to an error. Construct a dummy using Any.
-        any_type = AnyType(TypeOfAny.from_error)
-        return [Instance(supertype, [any_type] * len(supertype.type_vars))]
+    # Nothing. Presumably due to an error. Construct a dummy using Any.
+    any_type = AnyType(TypeOfAny.from_error)
+    return [Instance(supertype, [any_type] * len(supertype.type_vars))]
 
 
 def class_derivation_paths(typ: TypeInfo, supertype: TypeInfo) -> List[List[TypeInfo]]:
@@ -61,8 +60,10 @@ def class_derivation_paths(typ: TypeInfo, supertype: TypeInfo) -> List[List[Type
             result.append([btype])
         else:
             # Try constructing a longer path via the base class.
-            for path in class_derivation_paths(btype, supertype):
-                result.append([btype] + path)
+            result.extend(
+                [btype] + path
+                for path in class_derivation_paths(btype, supertype)
+            )
 
     return result
 
@@ -82,11 +83,10 @@ def map_instance_to_direct_supertypes(instance: Instance, supertype: TypeInfo) -
 
     if result:
         return result
-    else:
-        # Relationship with the supertype not specified explicitly. Use dynamic
-        # type arguments implicitly.
-        any_type = AnyType(TypeOfAny.unannotated)
-        return [Instance(supertype, [any_type] * len(supertype.type_vars))]
+    # Relationship with the supertype not specified explicitly. Use dynamic
+    # type arguments implicitly.
+    any_type = AnyType(TypeOfAny.unannotated)
+    return [Instance(supertype, [any_type] * len(supertype.type_vars))]
 
 
 def instance_to_type_environment(instance: Instance) -> Dict[TypeVarId, Type]:

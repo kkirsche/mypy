@@ -154,10 +154,11 @@ class PatternChecker(PatternVisitor[PatternType]):
         #
         # Collect the final type
         #
-        types = []
-        for pattern_type in pattern_types:
-            if not is_uninhabited(pattern_type.type):
-                types.append(pattern_type.type)
+        types = [
+            pattern_type.type
+            for pattern_type in pattern_types
+            if not is_uninhabited(pattern_type.type)
+        ]
 
         #
         # Check the capture types
@@ -195,9 +196,15 @@ class PatternChecker(PatternVisitor[PatternType]):
         narrowed_type, rest_type = self.chk.conditional_types_with_intersection(
             current_type, [get_type_range(typ)], o, default=current_type
         )
-        if not isinstance(get_proper_type(narrowed_type), (LiteralType, UninhabitedType)):
-            return PatternType(narrowed_type, UnionType.make_union([narrowed_type, rest_type]), {})
-        return PatternType(narrowed_type, rest_type, {})
+        return (
+            PatternType(narrowed_type, rest_type, {})
+            if isinstance(
+                get_proper_type(narrowed_type), (LiteralType, UninhabitedType)
+            )
+            else PatternType(
+                narrowed_type, UnionType.make_union([narrowed_type, rest_type]), {}
+            )
+        )
 
     def visit_singleton_pattern(self, o: SingletonPattern) -> PatternType:
         current_type = self.type_context[-1]
@@ -237,9 +244,7 @@ class PatternChecker(PatternVisitor[PatternType]):
         if isinstance(current_type, TupleType):
             inner_types = current_type.items
             size_diff = len(inner_types) - required_patterns
-            if size_diff < 0:
-                return self.early_non_match()
-            elif size_diff > 0 and star_position is None:
+            if size_diff < 0 or size_diff > 0 and star_position is None:
                 return self.early_non_match()
         else:
             inner_type = self.get_sequence_type(current_type)
@@ -320,8 +325,7 @@ class PatternChecker(PatternVisitor[PatternType]):
             return AnyType(TypeOfAny.from_another_any, t)
         if isinstance(t, UnionType):
             items = [self.get_sequence_type(item) for item in t.items]
-            not_none_items = [item for item in items if item is not None]
-            if len(not_none_items) > 0:
+            if not_none_items := [item for item in items if item is not None]:
                 return make_simplified_union(not_none_items)
             else:
                 return None
@@ -405,11 +409,7 @@ class PatternChecker(PatternVisitor[PatternType]):
 
             captures[o.rest] = rest_type
 
-        if can_match:
-            # We can't narrow the type here, as Mapping key is invariant.
-            new_type = self.type_context[-1]
-        else:
-            new_type = UninhabitedType()
+        new_type = self.type_context[-1] if can_match else UninhabitedType()
         return PatternType(new_type, current_type, captures)
 
     def get_mapping_item_type(
