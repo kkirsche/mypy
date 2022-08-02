@@ -107,21 +107,14 @@ def literal(e: Expression) -> int:
         return literal(e.target)
 
     elif isinstance(e, IndexExpr):
-        if literal(e.index) == LITERAL_YES:
-            return literal(e.base)
-        else:
-            return LITERAL_NO
-
+        return literal(e.base) if literal(e.index) == LITERAL_YES else LITERAL_NO
     elif isinstance(e, NameExpr):
         return LITERAL_TYPE
 
     if isinstance(e, (IntExpr, FloatExpr, ComplexExpr, StrExpr, BytesExpr)):
         return LITERAL_YES
 
-    if literal_hash(e):
-        return LITERAL_YES
-
-    return LITERAL_NO
+    return LITERAL_YES if literal_hash(e) else LITERAL_NO
 
 
 Key = Tuple[Any, ...]

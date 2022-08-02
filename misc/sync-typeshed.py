@@ -20,8 +20,9 @@ from typing import Optional
 def check_state() -> None:
     if not os.path.isfile("README.md"):
         sys.exit("error: The current working directory must be the mypy repository root")
-    out = subprocess.check_output(["git", "status", "-s", os.path.join("mypy", "typeshed")])
-    if out:
+    if out := subprocess.check_output(
+        ["git", "status", "-s", os.path.join("mypy", "typeshed")]
+    ):
         # If there are local changes under mypy/typeshed, they would be lost.
         sys.exit('error: Output of "git status -s mypy/typeshed" must be empty')
 

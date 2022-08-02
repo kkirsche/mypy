@@ -42,7 +42,7 @@ def confirm(resp: bool = False, **kargs) -> bool:
     kargs["rest"] = "to this {f2}/*{e2}".format(**kargs) if kargs.get("f2") else ""
     prompt = "{act} all files {rec}matching this expression {f1}/*{e1} {rest}".format(**kargs)
     prompt.format(**kargs)
-    prompt = "{} [{}]|{}: ".format(prompt, "Y" if resp else "N", "n" if resp else "y")
+    prompt = f'{prompt} [{"Y" if resp else "N"}]|{"n" if resp else "y"}: '
     while True:
         ans = input(prompt).lower()
         if not ans:
@@ -50,10 +50,7 @@ def confirm(resp: bool = False, **kargs) -> bool:
         if ans not in ["y", "n"]:
             print("Please, enter (y) or (n).")
             continue
-        if ans == "y":
-            return True
-        else:
-            return False
+        return ans == "y"
 
 
 actions = ["cp", "mv", "rm"]
@@ -129,7 +126,7 @@ def main(
 
     """
     if action not in actions:
-        print("Your action have to be one of this: {}".format(", ".join(actions)))
+        print(f'Your action have to be one of this: {", ".join(actions)}')
         return
 
     rec = "[Recursively] " if not_recursive else ""
@@ -137,17 +134,17 @@ def main(
         extension = f".{extension}"
     if not to_extension.startswith("."):
         to_extension = f".{to_extension}"
-    if directory.endswith("/"):
-        directory = directory[:-1]
+    directory = directory.removesuffix("/")
     if action == "cp":
         if confirm(act="Copy", rec=rec, f1=directory, e1=extension, f2=directory, e2=to_extension):
             apply_all(shutil.copy, directory, extension, to_extension, exclude, not_recursive)
-    elif action == "rm":
-        if confirm(act="Remove", rec=rec, f1=directory, e1=extension):
-            apply_all(os.remove, directory, extension, exclude=exclude, recursive=not_recursive)
     elif action == "mv":
         if confirm(act="Move", rec=rec, f1=directory, e1=extension, f2=directory, e2=to_extension):
             apply_all(shutil.move, directory, extension, to_extension, exclude, not_recursive)
+
+    elif action == "rm":
+        if confirm(act="Remove", rec=rec, f1=directory, e1=extension):
+            apply_all(os.remove, directory, extension, exclude=exclude, recursive=not_recursive)
 
 
 if __name__ == "__main__":

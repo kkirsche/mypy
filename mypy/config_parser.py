@@ -41,7 +41,7 @@ def parse_version(v: Union[str, float]) -> Tuple[int, int]:
     m = re.match(r"\A(\d)\.(\d+)\Z", str(v))
     if not m:
         raise argparse.ArgumentTypeError(f"Invalid python version '{v}' (expected format: 'x.y')")
-    major, minor = int(m.group(1)), int(m.group(2))
+    major, minor = int(m[1]), int(m[2])
     if major == 2 and minor == 7:
         pass  # Error raised elsewhere
     elif major == 3:
@@ -94,8 +94,7 @@ def split_and_match_files_list(paths: Sequence[str]) -> List[str]:
 
     for path in paths:
         path = expand_path(path.strip())
-        globbed_files = fileglob.glob(path, recursive=True)
-        if globbed_files:
+        if globbed_files := fileglob.glob(path, recursive=True):
             expanded_paths.extend(globbed_files)
         else:
             expanded_paths.append(path)
@@ -231,10 +230,7 @@ def parse_config_file(
 
     os.environ["MYPY_CONFIG_FILE_DIR"] = os.path.dirname(os.path.abspath(config_file))
 
-    if "mypy" not in parser:
-        if filename or file_read not in defaults.SHARED_CONFIG_FILES:
-            print(f"{file_read}: No [mypy] section in config file", file=stderr)
-    else:
+    if "mypy" in parser:
         section = parser["mypy"]
         prefix = f"{file_read}: [mypy]: "
         updates, report_dirs = parse_section(
@@ -244,6 +240,8 @@ def parse_config_file(
             setattr(options, k, v)
         options.report_dirs.update(report_dirs)
 
+    elif filename or file_read not in defaults.SHARED_CONFIG_FILES:
+        print(f"{file_read}: No [mypy] section in config file", file=stderr)
     for name, section in parser.items():
         if name.startswith("mypy-"):
             prefix = get_prefix(file_read, name)
@@ -252,16 +250,16 @@ def parse_config_file(
             )
             if report_dirs:
                 print(
-                    "%sPer-module sections should not specify reports (%s)"
-                    % (prefix, ", ".join(s + "_report" for s in sorted(report_dirs))),
+                    f'{prefix}Per-module sections should not specify reports ({", ".join(f"{s}_report" for s in sorted(report_dirs))})',
                     file=stderr,
                 )
+
             if set(updates) - PER_MODULE_OPTIONS:
                 print(
-                    "%sPer-module sections should only specify per-module flags (%s)"
-                    % (prefix, ", ".join(sorted(set(updates) - PER_MODULE_OPTIONS))),
+                    f'{prefix}Per-module sections should only specify per-module flags ({", ".join(sorted(set(updates) - PER_MODULE_OPTIONS))})',
                     file=stderr,
                 )
+
                 updates = {k: v for k, v in updates.items() if k in PER_MODULE_OPTIONS}
             globs = name[5:]
             for glob in globs.split(","):
@@ -418,15 +416,13 @@ def parse_section(
                 elif key.startswith("no_") and hasattr(template, key[3:]):
                     options_key = key[3:]
                     invert = True
-                elif key.startswith("allow") and hasattr(template, "dis" + key):
-                    options_key = "dis" + key
+                elif key.startswith("allow") and hasattr(template, f"dis{key}"):
+                    options_key = f"dis{key}"
                     invert = True
                 elif key.startswith("disallow") and hasattr(template, key[3:]):
                     options_key = key[3:]
                     invert = True
-                elif key == "strict":
-                    pass  # Special handling below
-                else:
+                elif key != "strict":
                     print(f"{prefix}Unrecognized option: {key} = {section[key]}", file=stderr)
                 if invert:
                     dv = getattr(template, options_key, None)
@@ -474,12 +470,12 @@ def parse_section(
                     results["follow_imports"] = "skip"
         if key == "almost_silent":
             print(
-                "%salmost_silent has been replaced by " "follow_imports=error" % prefix,
+                f"{prefix}almost_silent has been replaced by follow_imports=error",
                 file=stderr,
             )
-            if v:
-                if "follow_imports" not in results:
-                    results["follow_imports"] = "error"
+
+            if v and "follow_imports" not in results:
+                results["follow_imports"] = "error"
         results[options_key] = v
     return results, report_dirs
 
@@ -599,10 +595,11 @@ def get_config_module_names(filename: Optional[str], modules: List[str]) -> str:
     if not filename or not modules:
         return ""
 
-    if not is_toml(filename):
-        return ", ".join(f"[mypy-{module}]" for module in modules)
-
-    return "module = ['%s']" % ("', '".join(sorted(modules)))
+    return (
+        "module = ['%s']" % ("', '".join(sorted(modules)))
+        if is_toml(filename)
+        else ", ".join(f"[mypy-{module}]" for module in modules)
+    )
 
 
 class ConfigTOMLValueError(ValueError):
